@@ -7,11 +7,11 @@ from PIL import Image
 import math
 from threading import Thread
 import threading
-import queue
+from multiprocessing import Pool, Lock
 from help_func.logging import LoggingHelper
 from CfgEnv.config import Config
 from help_func.help_python import myUtil
-import csv
+
 import copy
 import random
 
@@ -19,12 +19,14 @@ from help_func.CompArea import TuList
 from help_func.CompArea import UnitBuf
 from help_func.CompArea import Component
 from help_func.CompArea import ChromaFormat
-from help_func.CompArea import PictureFormat
-from help_func.CompArea import UniBuf
 from help_func.CompArea import Area
 
+from collections import namedtuple
+import csv
+datatype = namedtuple('datatype', ['type', 'binlist', 'object_num', 'curent_num', 'opt_num'])
 if __name__ == '__main__':
     os.chdir("../")
+
 
 
 class BuildData(object):
@@ -33,14 +35,12 @@ class BuildData(object):
     COLOR_GREEN = np.array([149, 43, 21], dtype='int16') << 2
     COLOR_BLUE = np.array([29, 255, 107], dtype='int16') << 2
     logger = LoggingHelper.get_instance().logger
-    configpath = './build_data/data_config.yml'
+    configpath = './build_dataset/data_config.yml'
     cfg = Config(configpath, logger)
     os.makedirs(cfg.DATASET_PATH, exist_ok=True)
     os.makedirs(cfg.TEMP_PATH, exist_ok=True)
     os.makedirs(cfg.DECODE_LOG_PATH, exist_ok=True)
     dataset_path = os.path.join(cfg.DATASET_PATH, cfg.DATASET_NAME)
-    if not cfg.ADDITION_DATA:
-        os.makedirs(dataset_path)
     trainingset_path = os.path.join(dataset_path, cfg.TRAININGSET_PATH)
     validation_path = os.path.join(dataset_path, cfg.VALIDATIONSET_PATH)
     testset_path = os.path.join(dataset_path, cfg.TESTSET_PATH)
@@ -58,11 +58,11 @@ class BuildData(object):
 
     training_datacnt = 0
     validation_datacnt = 0
-    # test_datacnt = 0
+    test_datacnt = 0
 
     training_datacnt += myUtil.xgetFileNum(trainingset_path)
     validation_datacnt += myUtil.xgetFileNum(validation_path)
-    # test_datacnt += myUtil.xgetFileNum(testset_path)
+    test_datacnt += myUtil.xgetFileNum(testset_path)
 
     os.makedirs(trainingset_path, exist_ok=True)
     os.makedirs(validation_path, exist_ok=True)
@@ -90,9 +90,9 @@ class BuildData(object):
     use_const_block = cfg.USE_CONST_BLOCK
     const_width = cfg.CONST_WIDTH
     const_height = cfg.CONST_HEIGHT
-    save_tu_const_block_info = cfg.SAVE_TU_CONST_BLOCK_INFO
+    save_tu_const_block_info = cfg.SAVE_TU_CONST_BLOCK_INFO # 0 : Disable , 1 : Luma , 2 : Chroma, 3 : Dual
 
-    get_testset_by_picture = cfg.GET_TESTSET_BY_PICTURE
+    get_testset_by_picture = True
 
 
     # Tu Shape
@@ -132,17 +132,11 @@ class BuildData(object):
     test_data_order = ['NAME', 'WIDTH', 'HEIGHT', 'X_POS', 'Y_POS']
     test_data_order += others_data
 
-    csv_header = ['NAME', 'WIDTH', 'HEIGHT'] + others_data
+    csv_header = ['NAME', 'WIDTH', 'HEIGHT', 'MSE'] + others_data
     training_csv_path = os.path.join(trainingset_path, csv_name)
     validation_csv_path = os.path.join(validation_path, csv_name)
 
-    myUtil.initHeaderCSV(training_csv_path, csv_header)
-    myUtil.initHeaderCSV(validation_csv_path, csv_header)
 
-    training_file = open(training_csv_path, 'a', newline='')
-    validation_file = open(validation_csv_path, 'a', newline='')
-    training_csv = csv.writer(training_file)
-    validation_csv = csv.writer(validation_file)
 
     if use_const_block:
         splitmode = 0
@@ -153,7 +147,7 @@ class imgInfo(BuildData):
 
     # os.makedirs(os.path.join(TrainingSetPath, '32x32'), exist_ok=True)
     # os.makedirs(os.path.join(TestSetPath, '32x32'), exist_ok=True)
-    def __init__(self, name, data_opt, targetnum):
+    def __init__(self, name, data_opt, targetnum, startbinnum):
         self.example_image_get = False
         binpath = "./ywkim_" + name + ".bin"
         self.name = name
@@ -163,9 +157,14 @@ class imgInfo(BuildData):
         self.width = struct.unpack('<h', self.img.read(2))[0]
         self.height = struct.unpack('<h', self.img.read(2))[0]
         self.POC = struct.unpack('<h', self.img.read(2))[0]
-        self.ofPOC = (targetnum + self.POC) // self.POC
-        self.cwidth = (int)(self.width / 2)
-        self.cheight = (int)(self.height / 2)
+
+        self.bin_number = startbinnum
+
+        self.target_num_list = np.full(self.POC, targetnum//self.POC)
+        self.target_num_list[:targetnum%self.POC] += 1
+        np.random.shuffle(self.target_num_list)
+        self.cwidth = self.width // 2
+        self.cheight = self.height // 2
         self.area = self.width * self.height
         self.carea = self.cwidth * self.cheight
         self.pelCumsum = []
@@ -209,7 +208,9 @@ class imgInfo(BuildData):
             if self.qp not in self.qpList:
                 self.logger.info("  Not matched qp..")
                 self.logger.info("  Skip binfile..")
-        for poc in range(self.POC):
+        csv_return_list = []
+        for poc, ofPOC in enumerate(self.target_num_list):
+
             # st_time = time.time()
             # Pic = []  # piclist {0:Original, 1:prediction, 2:reconstruction, 3:unfiltered }
             # PicUV = []
@@ -379,10 +380,10 @@ class imgInfo(BuildData):
             pos_list.tulist = pos_list.tulist[:, perm]
             # np.random.shuffle(pos_list)
             pos_list.resetMember()
-            if len(pos_list.tulist[0]) <= self.ofPOC:
+            if len(pos_list.tulist[0]) <= ofPOC:
                 pass
             elif self.getopt == 0:
-                pos_list.tulist = pos_list.tulist[:, :self.ofPOC]
+                pos_list.tulist = pos_list.tulist[:, : ofPOC]
             else:
                 if self.getopt == 1:
                     prob_list = pos_list.width * pos_list.height
@@ -412,25 +413,30 @@ class imgInfo(BuildData):
                     prob_list = np.array(prob_list)
                 pos_list.tulist = pos_list.tulist[:,
                                   np.random.choice(np.arange(len(prob_list)),
-                                                   self.ofPOC, p=prob_list / prob_list.sum())]
+                                                   ofPOC, p=prob_list / prob_list.sum())]
 
             # 0: width, 1: height, 2: x_pos 3: y_pos, 4 : qp, 5 : mode
             pos_list.resetMember()
             # print("Until Tu Extracting : %s", time.time() - st_time)
             for block in pos_list.tulist.T:
-                self.thlock.acquire()
-                if self.dataopt == 1:  # training
-                    BuildData.training_datacnt += 1
-                    block_path = os.path.join(self.trainingset_path, str(BuildData.training_datacnt) + '.bin')
-                    self.training_csv.writerow([str(BuildData.training_datacnt) + '.bin', *block[:2], *block[4:]])
-                else:
-                    BuildData.validation_datacnt += 1
-                    block_path = os.path.join(self.validation_path, str(BuildData.validation_datacnt) + '.bin')
-                    self.validation_csv.writerow([str(BuildData.validation_datacnt) + '.bin', *block[:2], *block[4:]])
-                self.thlock.release()
+
                 blockdata = (block[3], block[3] + block[1], block[2], block[2] + block[0],
                              block[3] >> 1, (block[1] >> 1) + (block[3] >> 1),
                              block[2] >> 1, (block[0] >> 1) + (block[2] >> 1))
+                if self.dataopt == 1:  # training
+                    block_path = os.path.join(self.trainingset_path, str(self.bin_number) + '.bin')
+                    # self.training_csv.writerow([str(ofPOC) + '.bin', *block[:2], *block[4:]])
+
+                else:
+                    block_path = os.path.join(self.validation_path, str(self.bin_number) + '.bin')
+                    # self.validation_csv.writerow([str(ofPOC) + '.bin', *block[:2], *block[4:]])
+                csv_return_list.append([str(self.bin_number) + '.bin',
+                                        myUtil.getMSEfromNumpy(
+                                            self.getBlockArea(pic.pelBuf[0], blockdata=blockdata),
+                                            self.getBlockArea(pic.pelBuf[2], blockdata=blockdata)),
+                                        *block[:2], *block[4:]
+                                        ])
+                self.bin_number += 1
                 imgdata = []
                 for (i, isUsePel) in enumerate(self.usePelDataList):
                     if isUsePel:
@@ -455,9 +461,10 @@ class imgInfo(BuildData):
                 self.saveImage(pic.reconstruction, real_pos_list.tulist, pos_list.tulist, 'recon_')
                 self.saveImage(pic.unfilteredRecon, real_pos_list.tulist, pos_list.tulist, 'unfiltered_')
 
-            self.logger.info("  POC_%d finished(%s Cnt : %d)" % (poc, self.name, len(pos_list.tulist[0])))
+            self.logger.info("  POC_%d finished(%s : %d ~ %d)" % (poc, self.name, self.bin_number - len(pos_list.tulist[0]), self.bin_number))
         self.img.close()
         os.remove('./ywkim_' + self.name + '.bin')
+        return csv_return_list
 
     def getBlockArea(self, pic, blockdata):
         y = pic[0][blockdata[0]:blockdata[1],
@@ -474,7 +481,7 @@ class imgInfo(BuildData):
         self.logger.info("%s binfile get test set.." % self.name)
         test_seq_path = os.path.join(self.testset_path, self.name)
         os.makedirs(test_seq_path, exist_ok=True)
-        for poc in range(self.POC):
+        for poc, ofPOC in enumerate(self.target_num_list):
             # st_time = time.time()
             if self.target_test_POC != 0 and poc >= self.target_test_POC:
                 self.logger.info("  %s POC is break(POC : %s)" % (self.name, poc))
@@ -798,49 +805,39 @@ class imgInfo(BuildData):
 
 
 class SplitManager(BuildData):
-    corelock = threading.Lock()
 
     def __init__(self):
-        self.cores = 0
         self.corenum = self.cfg.PARALLEL_DECODE
-        self.filelist = self.getFileListsFromList(self.cfg.TRAINING_BIN_PATH)
-        self.testlist = self.getFileListsFromList(self.cfg.TEST_BIN_PATH)
-        self.validationlist = self.getFileListsFromList(self.cfg.VALIDATION_BIN_PATH)
-        self.orglist = self.getFileListsFromList(self.cfg.TRAINING_ORG_PATH, pattern='.yuv')
-        self.testOrgList = self.getFileListsFromList(self.cfg.TEST_ORG_PATH, pattern='.yuv')
-        self.validationOrgList = self.getFileListsFromList(self.cfg.VALIDATION_ORG_PATH, pattern='.yuv')
+        self.traininglist = self.getFileListsFromList(self.cfg.TRAINING_BIN_PATH, pattern='.bin', isfiltering=True)
+        self.testlist = self.getFileListsFromList(self.cfg.TEST_BIN_PATH, pattern='.bin', isfiltering=True)
+        self.validationlist = self.getFileListsFromList(self.cfg.VALIDATION_BIN_PATH, pattern='.bin', isfiltering=True)
+
+        self.datatype = {'Training':datatype('Training', self.traininglist, self.cfg.TARGET_DATASET_NUM, self.training_datacnt, 1),
+                         'Validation':datatype('Validation', self.validationlist, self.cfg.VALIDATION_DATSET_NUM, self.validation_datacnt,2),
+                         'Test':datatype('Test', self.testlist, self.cfg.TARGET_TESTSET_NUM, self.test_datacnt, 0)}
+        self.video_orglist = self.getFileListsFromList(self.cfg.VIDEO_ORG_PATH, pattern='.yuv')
+        self.png_orglist = self.getFileListsFromList(self.cfg.PNG_ORG_PATH, pattern='.yuv')
         self.logpath = self.cfg.DECODE_LOG_PATH
         os.makedirs(self.logpath, exist_ok=True)
         # self.myftp = self.tryReconnectFTP()
         # self.seq = self.initSeqeuences()
 
-    def getFileListsFromList(self, list, pattern='.bin'):
+    def getFileListsFromList(self, list, pattern='.bin', isfiltering=False):
         filelist = []
         for files in list:
             filelist += myUtil.getFileList(files, pattern)
+        for f in filelist:
+            if isfiltering and (int(f.split('.bin')[0].split('_')[-1]) not in self.qpList or (f[:2] == 'AI' and self.mode == 2) or (f[:2] != 'AI' and self.mode == 1)):
+                del f
         return filelist
 
-    def OnlyOneIntra(self, filepath, yuvpath):
-        commands = []
-        orgdic = {}
-        filelist = self.getFileListsFromList(filepath, pattern='.bin')
-        orglist = self.getFileListsFromList(yuvpath, pattern='.yuv')
 
-        for org in orglist:
-            orgdic['PNG' + str(os.path.basename(org).split('_')[0])] = org
-        for file in filelist:
-            if os.path.basename(file).split('_')[1] in orgdic:
-                command = self.cfg.DECODER_PATH + ' -b ' + file + ' -i ' + orgdic[
-                    str(os.path.basename(file).split('_')[1])] + ' -bd ' + '8'
-                commands.append((os.path.basename(file), command))
-        return commands
-
-    def initCommand(self, filelist, orglist):
+    def initCommand(self, filelist):
         seqs = []
         bdDic = {}
         # frameDic = {}
         # framenum = 0
-        with open("./build_data/Sequences.csv", 'r') as reader:
+        with open("./build_dataset/Sequences.csv", 'r') as reader:
             # with open("./SequenceSetting/CTCSequences.csv", 'r') as reader:
             data = reader.read()
             lines = data.strip().split('\n')
@@ -855,18 +852,26 @@ class SplitManager(BuildData):
             #     bdDic[''.join(seq[0].split('_')[1:]).lower()] = seq[2]
             # frameDic[seq[0].lower()] = seq[8]
         commands = []
-        for org in orglist:
-            tmp = str(os.path.basename(org).split(".")[0])
+        png_org_list = []
+        video_org_list = []
+        for org in self.png_orglist:
+            png_org_list.append('_'.join(str(os.path.basename(org).split('.yuv')[0]).split('_')[:3]).lower())
+        for org in self.video_orglist:
+            tmp = str(os.path.basename(org).split(".yuv")[0])
             if tmp.split("_")[0].lower() != "netflix":
                 tmp = '_'.join(tmp.split("_")[:3]).lower()
             else:
                 tmp = '_'.join(tmp.split("_")[:4]).lower()
-            for binfile in filelist:
-                if binfile.split('_')[1] == 'PNG' and tmp == binfile.split('_')[2]:
-                    command = self.cfg.DECODER_PATH + ' -b ' + binfile + ' -i ' + org + ' -bd 8'
-                    commands.append((os.path.basename(binfile), command))
-                    # framenum +=1
-                else:
+            video_org_list.append(tmp)
+
+        for binfile in filelist:
+            if os.path.basename(binfile).split('_')[1] == 'PNG':
+                for tmp, org in zip(png_org_list, self.png_orglist):
+                    if tmp == '_'.join(os.path.basename(binfile).split('_')[2:5]):
+                        command = self.cfg.DECODER_PATH + ' -b ' + binfile + ' -i ' + org + ' -bd 8'
+                        commands.append((os.path.basename(binfile), command))
+            else:
+                for tmp, org in zip(video_org_list, self.video_orglist):
                     if os.path.basename(binfile).lower().split('_')[1] != 'netflix':
                         if '_'.join(os.path.basename(binfile).lower().split("_")[1:4]).lower() == tmp:
                             # command = Decoderpath + ' -b ' + binfile + ' -i ' + org + ' -bd ' + bdDic[tmp]
@@ -877,9 +882,9 @@ class SplitManager(BuildData):
                             # command = Decoderpath + ' -b ' + binfile + ' -i ' + org + ' -bd ' + bdDic[tmp]
                             command = self.cfg.DECODER_PATH + ' -b ' + binfile + ' -i ' + org + ' -bd ' + bdDic[tmp]
                             commands.append((os.path.basename(binfile), command))
-                            # framenum += frameDic[tmp]
-        # return commands, framenum
         return commands
+
+
 
     def runDecoder(self, command):
         (name, command) = command
@@ -893,79 +898,86 @@ class SplitManager(BuildData):
         self.logger.info("%s done" % name)
         return name.replace(".bin", "")
 
-    def runThreading(self, command, isTraining, targetnum):
+    def runThreading(self, command, isTraining, targetnum, start_bin_num):
+        if targetnum<1:
+            return
         name = self.runDecoder(command)
-        splitimg = imgInfo(name, isTraining, targetnum)
+        splitimg = imgInfo(name, isTraining, targetnum, start_bin_num)
         if isTraining:
-            splitimg.getTrainingset()
+            return splitimg.getTrainingset()
         else:
-            splitimg.getTestSet()
-        self.corelock.acquire()
-        self.cores -= 1
-        self.corelock.release()
+            return splitimg.getTestSet()
+
 
     # def CalculateTargetNum(self, cur_num, target_num, remain):
     #     return (target_num - cur_num) //  remain
 
-    def getTrainingset(self):
-        if not len(self.filelist):
+    @staticmethod
+    def extend_list(_list):
+        temp = []
+        for i in _list:
+            if i is None:
+                continue
+            assert isinstance(i, list)
+            temp.extend(i)
+        return temp
+
+
+    def getDataset(self, kind_of_data):
+        obj_num = self.datatype[kind_of_data].object_num - self.datatype[kind_of_data].curent_num
+        if obj_num<=0:
+            self.logger.info("number of current {} is over obejct num".format(kind_of_data))
+        datalist = self.datatype[kind_of_data].binlist
+        if not len(datalist):
+            self.logger.info('There is no data : {}'.format(kind_of_data))
             return
-        targetnum = self.cfg.TARGET_DATASET_NUM // len(self.filelist)  # 각 bin file에서 데이터를 몇개 뽑을 것인지 체크
-        if self.cfg.IS_ONLY_ONE_INTRA:
-            commands = self.OnlyOneIntra(self.cfg.TRAINING_PNG_PATH, self.cfg.PNG_ORG_PATH)
+        targetnumlist = np.full(len(datalist), obj_num // len(datalist))
+        targetnumlist[:obj_num % len(datalist)] += 1
+        start_num_list = np.cumsum(targetnumlist) + self.datatype[kind_of_data].curent_num - targetnumlist
+
+        commands = self.initCommand(self.datatype[kind_of_data].binlist)
+        # self.runThreading(commands[0], 1, targetnumlist[0], start_num_list[0])
+        pool = Pool(self.corenum)
+        csv_list = self.extend_list(pool.starmap(self.runThreading, zip(commands, [self.datatype[kind_of_data].opt_num] * len(commands), targetnumlist, start_num_list)))
+        if kind_of_data=='Training':
+            # myUtil.initHeaderCSV(self.training_csv_path, self.csv_header)
+            # training_file = open(self.training_csv_path, 'a', newline='')
+            # self.training_csv = csv.writer(training_file)
+            self.initHeaderAndWriteCSV(self.training_csv_path, self.csv_header, csv_list)
+        elif kind_of_data=='Validation':
+            self.initHeaderAndWriteCSV(self.validation_csv_path, self.csv_header, csv_list)
+
+        #     myUtil.initHeaderCSV(self.validation_csv_path, self.csv_header)
+        #     validation_file = open(self.validation_csv_path, 'a', newline='')
+        #     self.validation_csv = csv.writer(validation_file)
+        #
+        # if self.datatype[kind_of_data].csv:
+        #     for row in csv_list:
+        #         self.datatype[kind_of_data].csv.writerow(row)
+        return
+
+    @staticmethod
+    def initHeaderAndWriteCSV(dir, header, csv_list):
+        if not os.path.exists(dir):
+            with open(dir, 'w', newline='') as f:
+                headerlinewriter = csv.writer(f)
+                headerlinewriter.writerow(header)
+                for row in csv_list:
+                    headerlinewriter.writerow(row)
         else:
-            commands = self.initCommand(self.filelist, self.orglist)
-        for command in commands:
-            while self.cores >= self.corenum:
-                time.sleep(3)
-            self.corelock.acquire()
-            self.cores += 1
-            self.corelock.release()
-            t = Thread(target=self.runThreading, args=(command, 1, targetnum))
-            t.start()
-        return
-
-    def getValidationset(self):
-        if not len(self.validationlist):
-            return
-        targetnum = self.cfg.VALIDATION_DATSET_NUM // len(self.validationlist)  # 각 bin file에서 데이터를 몇개 뽑을 것인지 체크
-
-        if self.cfg.IS_ONLY_ONE_INTRA:
-            commands = self.OnlyOneIntra(self.cfg.VALIDATION_PNG_PATH, self.cfg.PNG_ORG_PATH)
-        else:
-            commands = self.initCommand(self.validationlist, self.validationOrgList)
-        for command in commands:
-            while self.cores >= self.corenum:
-                time.sleep(3)
-            self.corelock.acquire()
-            self.cores += 1
-            self.corelock.release()
-            t = Thread(target=self.runThreading, args=(command, 2, targetnum))
-            t.start()
-        return
-
-    def getTestset(self):
-        if not len(self.testlist):
-            return
-        targetnum = self.cfg.TARGET_TESTSET_NUM // len(self.testlist)  # 각 bin file에서 데이터를 몇개 뽑을 것인지 체크
-        commands = self.initCommand(self.testlist, self.testOrgList)
-        for command in commands:
-            while self.cores >= self.corenum:
-                time.sleep(3)
-            self.cores += 1
-            t = Thread(target=self.runThreading, args=(command, 0, targetnum))
-            t.start()
-
-        return
-
+            with open(dir, 'a', newline='') as f:
+                headerlinewriter = csv.writer(f)
+                for row in csv_list:
+                    headerlinewriter.writerow(row)
 
 if __name__ == '__main__':
     # os.chdir("../")
     print(os.getcwd())
     sp = SplitManager()
-    sp.getTrainingset()
-    sp.getTestset()
-    sp.getValidationset()
+    # sp.getDataset('Training')
+    sp.getDataset('Validation')
+    # sp.getDataset('Test')
+
     # st = time.time()
     # fsize = os.path.getsize('./ywkim_AI_MAIN10_FoodMarket4_3840x2160_60_10b_S02_27.bin')
     # im =  open('./ywkim_AI_MAIN10_CatRobot1_3840x2160_60_10b_S04_22.bin', 'rb')

@@ -1,26 +1,24 @@
 NET_INFO_PATH: ./data_config.yml
 #Basic Path
 DATASET_NAME: 128x128_FIX
-#TRAINING_ORG_PATH : ["F:\\DIV2K_train_YUV"]
 
-TRAINING_ORG_PATH: [D:/origCfP]
-TEST_ORG_PATH: [D:/origCfP]
-VALIDATION_ORG_PATH: []
-DECODE_LOG_PATH: ./build_data/logs
-TRAINING_BIN_PATH: [C:/Users/YangwooKim/Desktop/Codec/VVC4.0/samplebin_one]
-#TRAINING_BIN_PATH : ["F:\\bin"]
-#TRAINING_BIN_PATH : []
 
-TEST_BIN_PATH: [C:/Users/YangwooKim/Desktop/Codec/VVC4.0/samplebin_one]
+VIDEO_ORG_PATH: [D:/origCfP]
+PNG_ORG_PATH: [D:/PNG_ORG]
+DECODE_LOG_PATH: ./build_dataset/logs
+TRAINING_BIN_PATH: [C:/Users/YangwooKim/Desktop/Codec/VVC8.0_sample_bin]
+
+
+TEST_BIN_PATH: [C:/Users/YangwooKim/Desktop/Codec/VVC8.0_sample_bin]
 #TEST_BIN_PATH : []
-VALIDATION_BIN_PATH: [C:/Users/YangwooKim/Desktop/Codec/VVC4.0/samplebin_one]
-ADDITION_DATA: 1
+VALIDATION_BIN_PATH: [C:/Users/YangwooKim/Desktop/Codec/VVC8.0_sample_bin]
+ADDITION_DATA: 0
 IS_ONLY_ONE_INTRA: 0  #default zero, only use when you get png data
 
 
 
 #Dataset Path
-DECODER_PATH: ./build_data/DecoderApp.exe
+DECODER_PATH: ./build_dataset/DecoderApp.exe
 DATASET_PATH: ./Dataset
 TRAININGSET_PATH: Training
 VALIDATIONSET_PATH: Validation
@@ -32,14 +30,14 @@ CSV_NAME: block_info.csv
 
 #Dataset Number
 TARGET_DATASET_NUM: 1000  # Training + Validation Set
-VALIDATION_DATSET_NUM: 100
+VALIDATION_DATSET_NUM: 200
 TARGET_TESTSET_NUM: 2  # [0 : All Frame, Others : A few frames ahead each Test Sequence]
 
 #Dataset Shape Setting
 USE_CONST_BLOCK: 1  # 0 : split by tu, 1 : split by const size
 CONST_WIDTH: 128
 CONST_HEIGHT: 128
-SAVE_TU_CONST_BLOCK_INFO: 3  # 0 : Disable , 1 : Luma , 2 : Chroma, 3 : Dual
+SAVE_TU_CONST_BLOCK_INFO: 1  # 0 : Disable , 1 : Luma , 2 : Chroma, 3 : Dual
 CONST_BLOCK_INTERVAL: 1
 
 #TU Size
@@ -63,16 +61,19 @@ QP: [22, 27, 32, 37]
 MODE: 1  # [0 : Intra&Inter], [1 : Only Intra], [2 : Only Inter]
 INTRA_MODE: []  # if Empty, All mode
 INTER_MODE: []
-PARALLEL_DECODE: 1  # [1 : None parrallel processing], [Others : Thread number]
-INTRA_TEMPORAL_SUBSAMPLE_RATIO: 8
-DECODER_BIT_DEPTH: 10
-TU_DATA_OTHERS: [QP, MODE, DEPTH]        # data order [width, height, x_pos, y_pos, others..]
+PARALLEL_DECODE: 3  # [1 : None parrallel processing], [Others : Thread number]
+DECODER_BIT_DEPTH: 10    # data order [width, height, x_pos, y_pos, others..]
 
 
 #Padding Setting
 LUMA_PAD: [2, 2, 2, 2] # [0 : None], [others : size] # [up, down, left, right]
 CHROMA_PAD: [1, 1, 1, 1] # [0 : None], [others : size]
 PIC_BOUNDARY_PAD: 1  # [-1 : minus one], [0 : Zeros], [1 : Same], [2 : without boundary block]
+
+
+CTU_DTA_OTHERS: []
+TU_DATA_OTHERS: ['QP', 'MODE', 'DEPTH', 'HOR_TR', 'VER_TR'] # data order [width, height, x_pos, y_pos, qp, ... etc]
+
 
 
 #Compensate Dataset Probabilty

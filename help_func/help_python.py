@@ -78,10 +78,11 @@ class myUtil(object):
 
     @staticmethod
     def initHeaderCSV(dir, header):
-        if not os.path.exists(dir):
-            with open(dir, 'w', newline='') as f:
-                headerlinewriter = csv.writer(f)
-                headerlinewriter.writerow(header)
+        with open(dir, 'w', newline='') as f:
+            headerlinewriter = csv.writer(f)
+            headerlinewriter.writerow(header)
+
+
 
     @staticmethod
     def getleafDirs(dir):
