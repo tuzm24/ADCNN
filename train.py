@@ -91,7 +91,7 @@ if __name__== '__main__':
     valid_dataloader = DataLoader(dataset=valid_dataset, batch_size=NetManager.BATCH_SIZE,
                                   drop_last=True, shuffle=True, num_workers=NetManager.NUM_WORKER)
     module = Model()
-    netmanage = NetTrainAndTest(net=module.model, train_loader=train_dataloader, valid_loader=valid_dataloader, test_loader=None)
+    netmanage = NetTrainAndTest(net=module, train_loader=train_dataloader, valid_loader=valid_dataloader, test_loader=None)
     netmanage.train()
 
 
