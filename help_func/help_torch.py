@@ -272,7 +272,7 @@ class result_collection:
 
 
     def strlastResult(self, epoch):
-        return  '({})[Epoch : {:k>4}] Loss : {:k>8.7f}, ' \
+        return  '({})[Epoch : {:>4}] Loss : {:k>8.7f}, ' \
                 'MSE : {:k>8.7f}, PSNR : {:k>5.4f}, ' \
                 'gtPSNR : {:k>5.4f}'.format(LearningIndex.INDEX_DIC[self.istraining],epoch, self.loss[-1],
                                            self.mse[-1], myUtil.psnr(self.mse[-1]),
@@ -359,7 +359,7 @@ class NetTrainAndTest:
         self.load_model()
         self.trc = result_collection(LearningIndex.TRAINING)
         self.vrc = result_collection(LearningIndex.VALIDATION)
-        self.trc = result_collection(LearningIndex.TEST)
+        self.testrc = result_collection(LearningIndex.TEST)
 
 
     def setGPUnum(self, gpunum = None):
@@ -557,8 +557,8 @@ class NetTrainAndTest:
     def valid(self, epoch_iter, input_channel_list = None):
 
         valid_dataset = self.valid_loader.dataset
-        cumsum_valid = torch.zeros(valid_dataset.getOutputDataShape()).to(
-            torch.device("cuda:0" if self.iscuda else "cpu"))
+        # cumsum_valid = torch.zeros(1).to(
+        #     torch.device("cuda:0" if self.iscuda else "cpu"))
 
         if input_channel_list is None:
             input_channel_list = list()
@@ -580,7 +580,7 @@ class NetTrainAndTest:
                 self.vrc.mse[-1].append(self.ResultMSELoss(outputs, gts).item())
                 if self.cuda_device_count > 1:
                     outputs = torch.cat(outputs, dim=0)
-                cumsum_valid += torch.abs(outputs).sum(dim=0)
+                # cumsum_valid += torch.abs(outputs).sum(dim=0)
                 if i == 0:
                     self.tb.batchImageToTensorBoard(self.tb.Makegrid(recons), self.tb.Makegrid(outputs), 'CNN_Reconstruction')
                     self.tb.plotDifferent(self.tb.Makegrid(gts - outputs), 'CNN_Residual')
@@ -605,7 +605,7 @@ class NetTrainAndTest:
         if self.highestScore < self.vrc.mse[-1]:
             self.save_model(isBest=True)
             self.highestScore = self.vrc.mse[-1]
-            self.logger('is Highest Model')
+            self.logger.info('is Highest Model')
         else:
             self.save_model(isBest=False)
 
