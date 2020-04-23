@@ -27,6 +27,8 @@ class Model(nn.Module):
         self.model = module.make_model().to(self.device)
         if self.n_GPUs>1:
             self.model = DataParallelModel(self.model).cuda()
+        elif self.n_GPUs==1:
+            self.model = self.model.cuda()
         if self.precision == 'half':
             self.model.half()
 

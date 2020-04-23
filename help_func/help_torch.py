@@ -336,11 +336,11 @@ class NetTrainAndTest:
         if self.iscuda:
             self.GTMSELoss = self.GTMSELoss.cuda()
             if self.cuda_device_count>1:
-                self.net = DataParallelModel(net).cuda()
+                # self.net = DataParallelModel(self.net).cuda()
                 self.criterion = DataParallelCriterion(self.criterion).cuda()
                 self.ResultMSELoss = DataParallelCriterion(self.ResultMSELoss).cuda()
             else:
-                self.net = self.net.cuda()
+                # self.net = self.net.cuda()
                 self.criterion = self.criterion.cuda()
                 self.ResultMSELoss = self.ResultMSELoss.cuda()
         self.optimizer = self.setopt(self.net.parameters(), NetManager.cfg.INIT_LEARNING_RATE, opt)
@@ -349,9 +349,9 @@ class NetTrainAndTest:
         #                                                           int(NetManager.cfg.OBJECT_EPOCH * 0.75)],
         #                                               gamma=0.1, last_epoch=-1)
         self.tb = Mytensorboard.get_instance(self.name)
-        summary_to_file(self.net,
-                        (self.data_channel_num, NetManager.TEST_BY_BLOCKED_HEIGHT, NetManager.TEST_BY_BLOCKED_WIDTH),
-                        os.path.join(self.tb.writer.logdir, 'model_summary.txt'))
+        # summary_to_file(self.net,
+        #                 (self.data_channel_num, NetManager.TEST_BY_BLOCKED_HEIGHT, NetManager.TEST_BY_BLOCKED_WIDTH),
+        #                 os.path.join(self.tb.writer.logdir, 'model_summary.txt'))
         self.lr_after_dscheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, NetManager.OBJECT_EPOCH)
         self.lr_scheduler = GradualWarmupScheduler(self.optimizer, multiplier=10, total_epoch=10, after_scheduler=self.lr_after_dscheduler)
         self.highestScore = 0
@@ -526,7 +526,7 @@ class NetTrainAndTest:
             for i in range(dataset.batch_num):
                 (inputs, gts, recons) = next(self.train_iter)
                 if self.iscuda:
-                    # recons = recons.cuda()
+                    recons = recons.cuda()
                     inputs = inputs.cuda()
                     gts = gts.cuda()
                 outputs = self.net(inputs)

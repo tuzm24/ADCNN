@@ -44,7 +44,7 @@ class _TrainAndValidDataBatch(DataBatch, CommonDatatSetting):
     """
     def __init__(self, istraining, input_idx = 3, others_return_idx = (0,2),
                  input_map_idx = (0,), scalar_values = ()):
-        DataBatch.__init__(self, istraining=istraining, batch_size=100)
+        DataBatch.__init__(self, istraining=istraining, batch_size=NetManager.BATCH_SIZE)
         CommonDatatSetting.__init__(self)
         self.input_idx = input_idx
         self.others_return_idx = others_return_idx
@@ -91,7 +91,7 @@ if __name__== '__main__':
     valid_dataloader = DataLoader(dataset=valid_dataset, batch_size=NetManager.BATCH_SIZE,
                                   drop_last=True, shuffle=True, num_workers=NetManager.NUM_WORKER)
     module = Model()
-    netmanage = NetTrainAndTest(net=module, train_loader=train_dataloader, valid_loader=valid_dataloader, test_loader=None)
+    netmanage = NetTrainAndTest(net=module.model, train_loader=train_dataloader, valid_loader=valid_dataloader, test_loader=None)
     netmanage.train()
 
 
