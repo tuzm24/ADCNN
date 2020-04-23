@@ -11,12 +11,13 @@ import torch.optim as optim
 from visual_tool.Tensorboard import Mytensorboard
 from itertools import cycle
 from help_func.help_python import myUtil
-from help_func.__init__ import ExecFileName
 from help_func.warmup_scheduler import GradualWarmupScheduler
 # from copy import deepcopy
 # from torchsummary import summary
 from help_func.my_torchsummary import summary_to_file
 import os
+import pickle
+from help_func.CompArea import LearningIndex
 
 class Swish(nn.Module):
     def __init__(self):
@@ -33,7 +34,6 @@ NON_LINEARITY = {
 }
 
 class torchUtil:
-    logger = LoggingHelper.get_instance().logger
 
     @staticmethod
     def online_mean_and_sd(loader):
@@ -41,8 +41,8 @@ class torchUtil:
 
             Var[x] = E[X^2] - E^2[X]
         """
-        input_channel = loader.dataset.dataset.data_channel_num
-        torchUtil.logger.info('Calculating data mean and std')
+        input_channel = loader.dataset.input_data_channel
+        print('Calculating data mean and std')
         cnt = 0
         fst_moment = torch.empty(input_channel).float().to(
             torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
@@ -58,7 +58,7 @@ class torchUtil:
             fst_moment = (cnt * fst_moment + sum_) / (cnt + nb_pixels)
             snd_moment = (cnt * snd_moment + sum_of_square) / (cnt + nb_pixels)
             cnt += nb_pixels
-        torchUtil.logger.info('Finish calculate data mean and std')
+        print('Finish calculate data mean and std')
         return fst_moment.cpu(), torch.sqrt(snd_moment - fst_moment ** 2).cpu()
 
     @staticmethod
@@ -67,7 +67,7 @@ class torchUtil:
             brr, idxs = np.unique(arr1d, return_counts=True)
             return brr[np.argmax(idxs)]
 
-        torchUtil.logger.info('Calculating data mean and std')
+        print('Calculating data mean and std')
         dataidx +=3
         x = []
         y = []
@@ -134,6 +134,12 @@ class torchUtil:
         out_w = w // r
         return x.contiguous().view(b, c, out_h, r, out_w, r).permute(0, 1, 3, 5, 2, 4).contiguous().view(b, out_channel, out_h, out_w)
 
+
+    @staticmethod
+    def psnr(mse):
+        if mse <= 0:
+            return 100
+        return torch.log10(1 / mse) * 10
 
 class BasicConv(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, groups=1, relu=True, bn=False, bias=False):
@@ -227,28 +233,105 @@ class CBAM(nn.Module):
         return x_out
 
 
-class NetTrainAndTest:
-    logger = LoggingHelper.get_instance().logger
-    def __init__(self, net, train_loader, valid_loader, test_loader, mainloss = 'l1', opt = 'adam', gpunum = None):
-        self.net = net
 
-        self.name = ExecFileName.filename
+class WeightedMSELoss(torch.nn.modules.loss._Loss):
+    __constants__ = ['reduction']
+
+    def __init__(self, weight):
+        super(WeightedMSELoss, self).__init__()
+        self.weight = [x/np.sum(weight) for x in weight]
+    def forward(self, input, target):
+        return torch.sum(torch.stack([F.mse_loss(input[:,x:x+1,...], target[:,x:x+1,...], reduction=self.reduction) * self.weight[x]
+                                       for x in range(len(self.weight))]))
+
+class WeightedL1Loss(torch.nn.modules.loss._Loss):
+    __constants__ = ['reduction']
+
+    def __init__(self, weight):
+        super(WeightedL1Loss, self).__init__()
+        self.weight = [x/np.sum(weight) for x in weight]
+    def forward(self, input, target):
+        return torch.sum(torch.stack([F.l1_loss(input[:,x:x+1,...], target[:,x:x+1,...], reduction=self.reduction) * self.weight[x]
+                                       for x in range(len(self.weight))]))
+
+
+class result_collection:
+    def __init__(self, istraining):
+        self.istraining = istraining
+        self.loss = []
+        self.mse = []
+        self.recon_mse = []
+        self.result_dic = {'loss':self.loss, 'mse':self.mse, 'recon_mse':self.recon_mse}
+        for x in self.result_dic.values():
+            x.append(list())
+
+
+    def __len__(self):
+        return len(self.loss)
+
+
+
+    def strlastResult(self, epoch):
+        return  '({})[Epoch : {:k>4}] Loss : {:k>8.7f}, ' \
+                'MSE : {:k>8.7f}, PSNR : {:k>5.4f}, ' \
+                'gtPSNR : {:k>5.4f}'.format(LearningIndex.INDEX_DIC[self.istraining],epoch, self.loss[-1],
+                                           self.mse[-1], myUtil.psnr(self.mse[-1]),
+                                           myUtil.psnr(self.recon_mse[-1]))
+
+
+    def endofEpoch(self, logger, tb, epoch):
+        for x in self.result_dic.values():
+            x[-1] = np.mean(x[-1])
+        self.printAndPlot(logger, tb, epoch)
+
+    def printAndPlot(self, logger, tb, epoch):
+        learning_str = LearningIndex.INDEX_DIC[self.istraining]
+        logger.info(self.strlastResult(epoch))
+        tb.step = epoch
+        tb.SetLoss('{}_CNN_LOSS'.format(learning_str), self.loss[-1])
+        tb.SetMSE('{}_VVC-Inloop_MSE'.format(learning_str), self.recon_mse[-1])
+        tb.SetMSE('{}_CNN_MSE'.format(learning_str), self.mse[-1])
+        tb.SetPSNR('{}_VVC-Inloop_PSNR'.format(learning_str), myUtil.psnr(self.recon_mse[-1]))
+        tb.SetPSNR('{}_CNN_PSNR'.format(learning_str), myUtil.psnr(self.mse[-1]))
+        tb.plotScalars()
+
+    def save(self, path):
+        with open(path+'_'+LearningIndex.INDEX_DIC[self.istraining], 'wb') as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(path, istraining):
+        with open(path+'_'+LearningIndex.INDEX_DIC[istraining], 'rb') as f:
+            return pickle.load(f)
+
+
+
+
+
+class NetTrainAndTest:
+    def __init__(self, net, train_loader, valid_loader, test_loader, mainloss = 'wl1', opt = 'adam', gpunum = None):
+
+        self.logger = LoggingHelper.get_instance().logger
+        self.net = net
+        self.name = NetManager.NET_NAME
         self.train_loader = train_loader
         self.valid_loader = valid_loader
         self.test_loader = test_loader
 
-        # self.data_padding = self.train_loader.dataset.dataset.data_padding
+        # self.data_padding = self.train_loader.dataset.data_padding
         if train_loader is not None:
-            self.data_channel_num = self.train_loader.dataset.dataset.DATA_CHANNEL_NUM
+            self.data_channel_num = self.train_loader.dataset.input_data_channel
+            self.output_channel_num = self.train_loader.dataset.output_data_channel
         else:
-            self.data_channel_num = self.test_loader.dataset.dataset.DATA_CHANNEL_NUM
+            self.data_channel_num = self.test_loader.dataset.input_data_channel
+            self.output_channel_num = self.test_loader.dataset.output_data_channel
 
         self.train_batch_num, self.train_iter = self.getBatchNumAndCycle(self.train_loader)
         self.valid_batch_num, self.valid_iter = self.getBatchNumAndCycle(self.valid_loader)
         self.test_batch_num, self.test_iter = self.getBatchNumAndCycle(self.test_loader)
-        self.criterion = self.setloss(mainloss)
-        self.ResultMSELoss = self.setloss('l2')
-        self.GTMSELoss = self.setloss('l2')
+        self.criterion = self.setloss(mainloss, [8,1,1])
+        self.ResultMSELoss = self.setloss('wl2', [4,1,1])
+        self.GTMSELoss = self.setloss('wl2', [4,1,1])
         self.setGPUnum(gpunum)
         if self.iscuda:
             self.GTMSELoss = self.GTMSELoss.cuda()
@@ -267,13 +350,16 @@ class NetTrainAndTest:
         #                                               gamma=0.1, last_epoch=-1)
         self.tb = Mytensorboard.get_instance(self.name)
         summary_to_file(self.net,
-                        (test_loader.dataset.dataset.DATA_CHANNEL_NUM, NetManager.TEST_BY_BLOCKED_HEIGHT, NetManager.TEST_BY_BLOCKED_WIDTH),
+                        (self.data_channel_num, NetManager.TEST_BY_BLOCKED_HEIGHT, NetManager.TEST_BY_BLOCKED_WIDTH),
                         os.path.join(self.tb.writer.logdir, 'model_summary.txt'))
         self.lr_after_dscheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, NetManager.OBJECT_EPOCH)
         self.lr_scheduler = GradualWarmupScheduler(self.optimizer, multiplier=10, total_epoch=10, after_scheduler=self.lr_after_dscheduler)
         self.highestScore = 0
         self.epoch = 0
         self.load_model()
+        self.trc = result_collection(LearningIndex.TRAINING)
+        self.vrc = result_collection(LearningIndex.VALIDATION)
+        self.trc = result_collection(LearningIndex.TEST)
 
 
     def setGPUnum(self, gpunum = None):
@@ -300,18 +386,22 @@ class NetTrainAndTest:
     @staticmethod
     def getBatchNumAndCycle(dataloader):
         if dataloader is not None:
-            return dataloader.dataset.dataset.batch_num, cycle(dataloader)
+            return dataloader.dataset.batch_num, cycle(dataloader)
         else:
             return None, None
 
 
     @staticmethod
-    def setloss(loss = 'l1'):
+    def setloss(loss='l1', weight=None):
         loss = loss.lower()
         if loss == 'l1':
             return nn.L1Loss()
         elif loss == 'l2':
             return nn.MSELoss()
+        elif loss == 'wl1':
+            return WeightedL1Loss(weight)
+        elif loss == 'wl2':
+            return WeightedMSELoss(weight)
         else:
             assert 0, 'The loss is ambiguous'
 
@@ -346,7 +436,7 @@ class NetTrainAndTest:
         test_psnr_mean = []
         with torch.no_grad():
             for i in range(len(self.test_loader)):
-                current_path = self.test_loader.dataset.dataset.batch[i]
+                current_path = self.test_loader.dataset.batch[i]
                 if current_path in '3840x2160':
                     pass
                 (recons, inputs, gts) = next(self.test_iter)
@@ -366,11 +456,12 @@ class NetTrainAndTest:
 
 
 
-    def load_model(self, gpunum = None):
+    def load_model(self, gpunum = None, result_collection=True):
         if gpunum is not None:
             self.cuda_device_count = gpunum
         if NetManager.cfg.LOAD_SAVE_MODEL:
             PATH = './' + NetManager.MODEL_PATH + '/' + self.name + '_model.pth'
+
             if self.iscuda:
                 checkpoint = torch.load(PATH)
             else:
@@ -399,6 +490,9 @@ class NetTrainAndTest:
                 if 'valid_psnr' in checkpoint:
                     self.highestScore = checkpoint['valid_psnr']
                 self.logger.info('It is Transfer Learning...')
+            if result_collection:
+                self.trc.load(os.path.join('./', NetManager.MODEL_PATH, self.name), LearningIndex.TRAINING)
+                self.vrc.load(os.path.join('./', NetManager.MODEL_PATH, self.name), LearningIndex.VALIDATION)
             self.logger.info('Load the saved checkpoint')
             # for g in optimizer.param_groups:
             #     g['lr'] = 0.0001
@@ -406,117 +500,115 @@ class NetTrainAndTest:
             self.setGPUnum(None)
 
 
-    def save_model(self):
+
+
+    def save_model(self, isBest=False):
+        if isBest:
+            PATH = './' + NetManager.MODEL_PATH + '/' + self.name + '_model_best.pth'
+        else:
+            PATH = './' + NetManager.MODEL_PATH + '/' + self.name + '_model.pth'
         torch.save({
             'epoch': self.epoch,
             'model_state_dict': self.net.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'TensorBoardStep': self.tb.step,
             'valid_psnr': self.highestScore
-        }, NetManager.MODEL_PATH + '/' + self.name + '_model.pth')
+        }, PATH)
+        self.trc.save(os.path.join('./', NetManager.MODEL_PATH, self.name))
+        self.vrc.save(os.path.join('./', NetManager.MODEL_PATH, self.name))
 
 
 
     def train(self, input_channel_list = None):
-        dataset = self.train_loader.dataset.dataset
+        dataset = self.train_loader.dataset
         self.logger.info('Training Start')
         for epoch_iter, epoch in enumerate(range(NetManager.OBJECT_EPOCH), self.epoch):
-            running_loss = 0.0
             for i in range(dataset.batch_num):
-                (recons, inputs, gts) = next(self.train_iter)
-                if torch.cuda.is_available():
+                (inputs, gts, recons) = next(self.train_iter)
+                if self.iscuda:
                     # recons = recons.cuda()
                     inputs = inputs.cuda()
                     gts = gts.cuda()
                 outputs = self.net(inputs)
                 loss = self.criterion(outputs, gts)
-                MSE = self.ResultMSELoss(outputs, gts)
-                recon_MSE = torch.mean((gts) ** 2)
+                if epoch_iter==0:
+                    self.trc.recon_mse[-1].append(self.GTMSELoss(recons, gts).item())
+                self.trc.mse[-1].append(self.ResultMSELoss(outputs, gts).item())
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-                running_loss += MSE.item()
-                self.tb.SetLoss('CNN', MSE.item())
-                self.tb.SetLoss('Recon', recon_MSE.item())
-                self.tb.plotScalars()
-                if i % NetManager.PRINT_PERIOD == NetManager.PRINT_PERIOD - 1:
-                    self.logger.info('[Epoch : %d, %5d/%d] loss: %.7f' %
-                                (epoch_iter, i + 1,
-                                 dataset.batch_num, running_loss / dataset.PRINT_PERIOD))
-                    running_loss = 0.0
+                self.trc.loss[-1].append(loss.item())
+                # self.tb.SetLoss('CNN_Filter', MSE.item())
+                # self.tb.SetLoss('VVC_In-loop', recon_MSE.item())
+                # self.tb.plotScalars()
+                # if i % NetManager.PRINT_PERIOD == NetManager.PRINT_PERIOD - 1:
+                #     self.logger.info('[Epoch : %d, %5d/%d] loss: %.7f' %
+                #                 (epoch_iter, i + 1,
+                #                  dataset.batch_num, running_loss / dataset.PRINT_PERIOD))
+                #     running_loss = 0.0
                 # del recons, inputs, gts
-                self.tb.step += 1  # Must Used
+            self.trc.endofEpoch(self.logger, self.tb, self.epoch)
+            self.tb.step += 1  # Must Used
             if self.valid_loader is not None:
                 self.valid(epoch_iter, input_channel_list)
             self.lr_scheduler.step(epoch_iter)
             self.epoch += 1
-            self.logger.info('Epoch %d Finished' % epoch_iter)
 
     def valid(self, epoch_iter, input_channel_list = None):
-        mean_loss_cnn = 0
-        mean_psnr_cnn = 0
-        mean_loss_recon = 0
-        mean_psnr_recon = 0
-        valid_dataset = self.valid_loader.dataset.dataset
+
+        valid_dataset = self.valid_loader.dataset
         cumsum_valid = torch.zeros(valid_dataset.getOutputDataShape()).to(
-            torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
+            torch.device("cuda:0" if self.iscuda else "cpu"))
 
         if input_channel_list is None:
             input_channel_list = list()
-            for i in range(valid_dataset.data_channel_num):
+            for i in range(valid_dataset.input_data_channel):
                 input_channel_list.append(str(i) + '_channel')
 
 
         for i in range(valid_dataset.batch_num):
             with torch.no_grad():
-                (recons, inputs, gts) = next(self.valid_iter)
-
-                if torch.cuda.is_available():
+                (inputs, gts, recons) = next(self.valid_iter)
+                if self.iscuda:
                     recons = recons.cuda()
                     inputs = inputs.cuda()
                     gts = gts.cuda()
                 outputs = self.net(inputs)
-                loss = self.criterion(outputs, gts)
-                recon_loss = torch.mean(torch.abs(gts))
-                MSE = self.ResultMSELoss(outputs, gts)
-                recon_MSE = torch.mean((gts) ** 2)
-                mean_psnr_cnn += myUtil.psnr(MSE.item())
-                mean_psnr_recon += myUtil.psnr(recon_MSE.item())
-                mean_loss_cnn += loss.item()
-                mean_loss_recon += recon_loss.item()
+                self.vrc.loss[-1].append(self.criterion(outputs, gts).item())
+                if epoch_iter==0:
+                    self.vrc.recon_mse[-1].append(self.GTMSELoss(recons, gts).item())
+                self.vrc.mse[-1].append(self.ResultMSELoss(outputs, gts).item())
                 if self.cuda_device_count > 1:
                     outputs = torch.cat(outputs, dim=0)
                 cumsum_valid += torch.abs(outputs).sum(dim=0)
                 if i == 0:
                     self.tb.batchImageToTensorBoard(self.tb.Makegrid(recons), self.tb.Makegrid(outputs), 'CNN_Reconstruction')
-                    self.tb.plotDifferent(self.tb.Makegrid(outputs), 'CNN_Residual')
-                    self.tb.plotDifferent(self.tb.Makegrid(outputs), 'CNN_Residual', percentile=100)
-                    if epoch_iter == 1:
-                        for channel, channel_name in enumerate(input_channel_list):
-                            self.tb.plotMap(valid_dataset.ReverseNorm(
-                                inputs.split(1, dim=1)[3], idx=channel).narrow(dim=2, start=0,                                                                                              length=128).narrow(
-                                dim=3, start=0, length=128), channel_name)
-                            # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[4], idx=4).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Mode_Map', [0, 3], 4)
-                            # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[5], idx=5).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Depth_Map', [1, 6], 6)
-                            # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[6], idx=6).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Hor_Trans', [0, 2], 2)
-                            # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[7], idx=7).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Ver_Trans', [0, 2], 2)
-                            # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[8], idx=8).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'ALF_IDX', [0, 16], 17)
-                    self.logger.info("[epoch:%d] Finish Plot Image" % epoch_iter)
-        cumsum_valid /= (valid_dataset.batch_num * valid_dataset.batch_size)
-        self.tb.plotMSEImage(cumsum_valid, 'Error_MSE')
-        self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=90)
-        self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=95)
-        self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=100)
-        if self.highestScore < (mean_psnr_cnn / len(self.valid_loader)):
-            self.save_model()
-            save_str = 'Save'
-            self.highestScore = mean_psnr_cnn / len(self.valid_loader)
+                    self.tb.plotDifferent(self.tb.Makegrid(gts - outputs), 'CNN_Residual')
+                    self.tb.plotDifferent(self.tb.Makegrid(gts - outputs), 'CNN_Residual', percentile=100)
+        #             if epoch_iter == 1:
+        #                 for channel, channel_name in enumerate(input_channel_list):
+        #                     self.tb.plotMap(valid_dataset.ReverseNorm(
+        #                         inputs.split(1, dim=1)[3], idx=channel).narrow(dim=2, start=0,                                                                                              length=128).narrow(
+        #                         dim=3, start=0, length=64), channel_name)
+        #                     # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[4], idx=4).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Mode_Map', [0, 3], 4)
+        #                     # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[5], idx=5).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Depth_Map', [1, 6], 6)
+        #                     # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[6], idx=6).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Hor_Trans', [0, 2], 2)
+        #                     # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[7], idx=7).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'Ver_Trans', [0, 2], 2)
+        #                     # tb.plotMap(dataset.ReverseNorm(inputs.split(1, dim=1)[8], idx=8).narrow(dim =2, start=2, length=128).narrow(dim =3, start=2, length=128), 'ALF_IDX', [0, 16], 17)
+        #             self.logger.info("[epoch:%d] Finish Plot Image" % epoch_iter)
+        # cumsum_valid /= (valid_dataset.batch_num * valid_dataset.batch_size)
+        # self.tb.plotMSEImage(cumsum_valid, 'Error_MSE')
+        # self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=90)
+        # self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=95)
+        # self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=100)
+        self.vrc.endofEpoch(self.logger, self.tb, self.epoch)
+        if self.highestScore < self.vrc.mse[-1]:
+            self.save_model(isBest=True)
+            self.highestScore = self.vrc.mse[-1]
+            self.logger('is Highest Model')
         else:
-            save_str = 'No Save'
-        self.logger.info('[epoch : %d] Recon_loss : %.7f, Recon_PSNR : %.7f' % (
-            epoch_iter, mean_loss_recon / len(self.valid_loader), mean_psnr_recon / len(self.valid_loader)))
-        self.logger.info('[epoch : %d] CNN_loss   : %.7f, CNN_PSNR :   %.7f   [%s]' % (
-            epoch_iter, mean_loss_cnn / len(self.valid_loader), mean_psnr_cnn / len(self.valid_loader), save_str))
+            self.save_model(isBest=False)
+
 
 
     @staticmethod

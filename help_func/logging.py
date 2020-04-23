@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from help_func.__init__ import ExecFileName
-
+import multiprocessing
 def get_str_time():
     return time.strftime('%a %d %b %Y, %Hh%Mm%S', time.localtime(time.time()))
 
@@ -37,7 +37,7 @@ class LoggingHelper(object):
         pass
     @classmethod
     def get_instance(cls):
-        if cls.INSTANCE is None:
+        if cls.INSTANCE is None and multiprocessing.current_process().name=='MainProcess':
             cls.INSTANCE = LoggingHelper()
         return cls.INSTANCE
 

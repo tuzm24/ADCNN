@@ -1,6 +1,6 @@
 NET_INFO_PATH: ./data_config.yml
 #Basic Path
-DATASET_NAME: 128x128_FIX
+DATASET_NAME: 64x64_FIX
 
 
 VIDEO_ORG_PATH: [D:/origCfP]
@@ -35,8 +35,8 @@ TARGET_TESTSET_NUM: 2  # [0 : All Frame, Others : A few frames ahead each Test S
 
 #Dataset Shape Setting
 USE_CONST_BLOCK: 1  # 0 : split by tu, 1 : split by const size
-CONST_WIDTH: 128
-CONST_HEIGHT: 128
+CONST_WIDTH: 64
+CONST_HEIGHT: 64
 SAVE_TU_CONST_BLOCK_INFO: 1  # 0 : Disable , 1 : Luma , 2 : Chroma, 3 : Dual
 CONST_BLOCK_INTERVAL: 1
 
@@ -66,8 +66,8 @@ DECODER_BIT_DEPTH: 10    # data order [width, height, x_pos, y_pos, others..]
 
 
 #Padding Setting
-LUMA_PAD: [2, 2, 2, 2] # [0 : None], [others : size] # [up, down, left, right]
-CHROMA_PAD: [1, 1, 1, 1] # [0 : None], [others : size]
+LUMA_PAD: [0, 0, 0, 0] # [0 : None], [others : size] # [up, down, left, right]
+CHROMA_PAD: [0, 0, 0, 0] # [0 : None], [others : size]
 PIC_BOUNDARY_PAD: 1  # [-1 : minus one], [0 : Zeros], [1 : Same], [2 : without boundary block]
 
 

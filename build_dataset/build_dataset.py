@@ -431,10 +431,11 @@ class imgInfo(BuildData):
                     block_path = os.path.join(self.validation_path, str(self.bin_number) + '.bin')
                     # self.validation_csv.writerow([str(ofPOC) + '.bin', *block[:2], *block[4:]])
                 csv_return_list.append([str(self.bin_number) + '.bin',
+                                        *block[:2],
                                         myUtil.getMSEfromNumpy(
                                             self.getBlockArea(pic.pelBuf[0], blockdata=blockdata),
                                             self.getBlockArea(pic.pelBuf[2], blockdata=blockdata)),
-                                        *block[:2], *block[4:]
+                                        *block[4:]
                                         ])
                 self.bin_number += 1
                 imgdata = []
@@ -974,9 +975,9 @@ if __name__ == '__main__':
     # os.chdir("../")
     print(os.getcwd())
     sp = SplitManager()
-    # sp.getDataset('Training')
+    sp.getDataset('Training')
     sp.getDataset('Validation')
-    # sp.getDataset('Test')
+    sp.getDataset('Test')
 
     # st = time.time()
     # fsize = os.path.getsize('./ywkim_AI_MAIN10_FoodMarket4_3840x2160_60_10b_S02_27.bin')

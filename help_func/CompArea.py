@@ -31,6 +31,14 @@ class PictureFormat:
     UNFILTEREDRECON = 3
     MAX_NUM_COMPONENT = 4
 
+class TuDataIndex:
+    QP = 0
+    MODE = 1
+    DEPTH = 2
+    HORTR = 3
+    VERTr = 4
+    MAX_NUM_COMPONENT = 4
+
 class TuList:
     # 0: width, 1: height, 2: x_pos 3: y_pos, 4 : qp, 5 : mode ..
 
@@ -119,16 +127,16 @@ class TuList:
         return TuList(tulist)
 
     @staticmethod
-    def loadTuList(f):
+    def loadTuList(f, tumean, tustd):
         row, num = struct.unpack('<2i', f.read(8))
         if not row:
             return TuList(None)
-        tulist = np.array(struct.unpack('<' + str(row * num) + 'h',
-                                        f.read(2*row*num)), dtype = 'int16').reshape((row, num))
+        tulist = (np.array(struct.unpack('<' + str(row * num) + 'h',
+                                        f.read(2*row*num)), dtype = 'int16').reshape((row, num))-tumean)/tustd
 
         return TuList(tulist)
 
-    def getTuMaskFromIndex(self, idx, height, width):
+    def  getTuMaskFromIndex(self, idx, height, width):
         # 0: width, 1: height, 2: x_pos 3: y_pos, 4 : qp, 5 : mode
         tumap = np.zeros((height, width))
         for i in range(len(self.width)):

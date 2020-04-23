@@ -8,7 +8,6 @@ import csv
 
 class myUtil(object):
 
-    logger = LoggingHelper.get_instance().logger
 
 
     @staticmethod
@@ -54,7 +53,7 @@ class myUtil(object):
         for (path, dirnames, files) in os.walk(dir):
             for filename in files:
                 if filename.endswith(ext):
-                    matches.append(os.path.join(dir, filename))
+                    matches.append(os.path.join(path, filename))
         return matches
 
 
@@ -103,7 +102,7 @@ class myUtil(object):
                 folders.append(root)
         return folders
 
-class SingletonInstane:
+class SingletonInstance:
   __instance = None
 
   @classmethod

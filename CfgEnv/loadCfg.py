@@ -13,7 +13,11 @@ class NetManager(object):
 
     #config load
     cfg = Config("config.yml", None)
-        #path
+
+    #####NET NAME#####
+    NET_NAME = cfg.NET_NAME
+
+    #path
     DATASET_PATH = cfg.DATASET_PATH
     TENSORBOARD_PATH = cfg.TENSORBOARD_PATH
     TRAINING_PATH = os.path.join(DATASET_PATH, 'Training')
@@ -60,11 +64,17 @@ class NetManager(object):
     NUM_WORKER = cfg.NUM_WORKER
     RESULT_DIR = cfg.RESULT_DIR
 
+    #model
+    ENSEMBLE = cfg.ENSEMBLE
+    CHOP = cfg.CHOP
+    PRECISION = cfg.PRECISION
+
+
     if not checkGPU():
         PRINT_PERIOD = 5
-        BATCH_SIZE = 6
+        BATCH_SIZE = 2
         cfg.USE_DATASET_SUBSET = 1.0
-        NUM_WORKER = 1
+        NUM_WORKER = 2
         OBJECT_EPOCH = 1
 
 

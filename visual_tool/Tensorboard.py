@@ -14,7 +14,8 @@ class Mytensorboard(NetManager):
     def __init__(self, comment=''):
         self.writer = SummaryWriter(comment='_' + comment)
         self.writerLayout = {'Loss': {},
-                             'PSNR': {}}
+                             'PSNR': {},
+                             'MSE': {}}
         self.step = 0
 
     @classmethod
@@ -152,10 +153,13 @@ class Mytensorboard(NetManager):
     def SetPSNR(self, name, value):
         self.writerLayout['PSNR'][name] = value
 
+    def SetMSE(self, name, value):
+        self.writerLayout['MSE'][name] = value
+
     def SetLearningRate(self, value):
         self.writer.add_scalars('LearningRate', {'lr': value}, self.step)
 
-[0,	1,	5,	10,	30,	70,	100,	125,	150]
-[39.42,	39.42,	39.42,	39.42,	39.42,	39.42,	39.42,	39.42,	39.42]
-[0,	39.4,	39.43,	39.53,	39.54,	39.57,	39.57,	39.58,	39.59]
-[0,	39.43,	39.49,	39.51,	39.51,	39.53,	39.54,	39.55,	39.555]
+# [0,	1,	5,	10,	30,	70,	100,	125,	150]
+# [39.42,	39.42,	39.42,	39.42,	39.42,	39.42,	39.42,	39.42,	39.42]
+# [0,	39.4,	39.43,	39.53,	39.54,	39.57,	39.57,	39.58,	39.59]
+# [0,	39.43,	39.49,	39.51,	39.51,	39.53,	39.54,	39.55,	39.555]

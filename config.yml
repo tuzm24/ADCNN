@@ -3,16 +3,18 @@ EXPERIMENT_NAME: ywkim_test
 
 
 #path
-DATASET_PATH: ./Dataset/128x128_FIX_NOPADDING_SEQ
+DATASET_PATH: ./Dataset/64x64_FIX
 TENSORBOARD_PATH: ./tensorboard/
 CSV_NAME: block_info.csv
-SAVE_PATH: model
+SAVE_PATH: saved
+
+NET_NAME: rdn
 
 #DataShape
 #TUDATA
 IS_CONST_TU_DATA: 1
 TU_ORDER: {QP: 0, MODE: 1, DEPTH: 2}
-IS_CONST_CTU_DATA: 1
+IS_CONST_CTU_DATA: 0
 
 #PELDATA
 PEL_DATA: [1, 1, 1, 1]  # Original, Prediction, Reconstruction, UnfiltredReconstruction
@@ -24,7 +26,7 @@ INIT_LEARNING_RATE: 0.00001
 PRINT_PERIOD: 600
 BATCH_SIZE: 25
 SET_NEW_MEAN_STD: 0
-LOAD_SAVE_MODEL: 1
+LOAD_SAVE_MODEL: 0
 USE_DATASET_SUBSET : 0.25
 
 
@@ -33,11 +35,11 @@ FRAMEWORK: 1  # 0 : tensorflow , 1 : pytorch
 
 #Test
 TEST_BY_BLOCKED: 1
-TEST_BY_BLOCKED_WIDTH: 128
-TEST_BY_BLOCKED_HEIGHT: 128
+TEST_BY_BLOCKED_WIDTH: 64
+TEST_BY_BLOCKED_HEIGHT: 64
 
 
-OBJECT_EPOCH: 150
+OBJECT_EPOCH: 200
 NUM_WORKER: 12
 
 #tensorboard
@@ -45,6 +47,10 @@ NUM_WORKER: 12
 GPU_MONITOR: 1
 RESULT_DIR: result
 
+#model
+ENSEMBLE: 0
+CHOP: 1
+PRECISION: 'single' # {'single': float32, 'half': float16}
 
 #Valiable, Save Valiable
 step: 0

@@ -59,7 +59,15 @@ class  DataBatch(NetManager):
         self.batch_num = len(self.batch)
         print("[%s NumberOfBatchs : %d]" %(LearningIndex.INDEX_DIC[istraining], self.batch_num))
         self.batch = np.array(self.batch).reshape(-1, len(self.batch[0][0]))
+        self.data = [None]*len(self.batch)
         self.iter = 0
+        self.reshapeFuncs = (self.reshapeOrg, self.reshapePred,
+                             self.reshapeRecon, self.reshapeUnfiltered)
+        self.imageMean = 0
+        self.imageStd = 1023
+        self.tulistMean = np.array((0, 0, 0, 0, 22, 0,  0, 0, 0)).reshape((-1, 1))
+        self.tulistStd =  np.array((1, 1, 1, 1, 37, 69, 6, 2, 2 )).reshape((-1, 1))
+
         # self.data = Queue()
         # t = threading.Thread(target=self.setNextData, daemon = True)
         # t.start()
@@ -106,24 +114,6 @@ class  DataBatch(NetManager):
         return
 
 
-    def getNextData(self):
-        data = self.data.get()
-        return data
-
-    def setNextData(self):
-        while True:
-            for i in range(self.iter, self.iter + self.batch_size):
-                pred, gt = self.unpackData(self.batch[i])
-                self.data.put((pred, gt))
-            self.iter +=self.batch_size
-            while self.data.qsize() != 0:
-                pass
-
-    def isReadySetData(self):
-        if self.data.qsize() == self.batch_size:
-            return True
-        return False
-
 
     # self.info - 0 : filename, 1 : width, 2: height, 3: qp, 4: mode, 5: depth ...
     # self : info, orgY, orgCb, orgCr, predY, predCb, predCr, reconY, reconCb, reconCr, unfiltredY, unfiltredCb, unfiltredCr
@@ -137,16 +127,16 @@ class  DataBatch(NetManager):
             self.predY, self.predCb, self.predCr,\
             self.reconY, self.reconCb, self.reconCr,\
             self.unfilteredY, self.unfilteredCb, self.unfilteredCr\
-                = np.split(np.array(struct.unpack(strdatanum, data.read(shortdatanum)),
-                                    dtype='float32'), split_bin, axis=0)
+                = np.split((np.array(struct.unpack(strdatanum, data.read(shortdatanum)),
+                                    dtype='float32')-self.imageMean)/self.imageStd, split_bin, axis=0)
             self.cwidth = self.info[1] // 2
             self.cheight = self.info[2] // 2
             if not self.IS_CONST_TU_DATA:
                 self.tulist = TuList(np.array([[*info[:2], 0, 0, *info[3:] ]]))
             else:
-                self.tulist = TuList.loadTuList(data)
+                self.tulist = TuList.loadTuList(data, self.tulistMean, self.tulistStd)
             if self.IS_CONST_CTU_DATA:
-                self.ctulist = TuList.loadTuList(data)
+                self.ctulist = TuList.loadTuList(data, self.tulistMean, self.tulistStd)
 
 
     def reshapeOrg(self):
@@ -176,11 +166,6 @@ class  DataBatch(NetManager):
         else:
             return x[:,pad:-pad,pad:-pad]
 
-    def TFdropPadding(self, x, pad, isDeepCopy = False):
-        if isDeepCopy:
-            return copy.deepcopy(x[pad:-pad,pad:-pad,:])
-        else:
-            return x[pad:-pad,pad:-pad,:]
 
     def loadMeanStd(self, loader, isGetNew = False):
         mean = 0
@@ -261,25 +246,7 @@ class TestDataBatch(NetManager):
     def unpackData(self, testFolderPath):
         # self.cur_path = testFolderPath
         csv = pd.read_csv(os.path.join(testFolderPath, self.CSV_NAME)).dropna(axis='columns').values
-        # width = np.max(csv[:,1].astype('int32') + csv[:, 3].astype('int32'))
-        # height = np.max(csv[:,2].astype('int32') + csv[:, 4].astype('int32'))
-        # cwidth = width//2
-        # cheight = height//2
-        # pic = []
-        # for i in range(PictureFormat.MAX_NUM_COMPONENT):
-        #     if self.PEL_DATA[i]:
-        #         pic.append(np.zeros((height, width)))
-        #         if not self.IS_ONLY_LUMA:
-        #             pic.append(np.zeros(cheight, cwidth))
-        #             pic.append(np.zeros(cheight, cwidth))
-        #         else:
-        #             self.appendNone(2, pic)
-        #     else:
-        #         self.appendNone(3, pic)
-        # picarea = Area(width, height, 0, 0)
-        # self.pic = UnitBuf(ChromaFormat.YCbCr4_2_0, picarea,*pic)
-        # self.tulist = TuList(None)
-        # self.ctulist = TuList(None)
+
         for info in csv:
             filepath = os.path.join(testFolderPath, info[0])
             split_bin, strdatanum, shortdatanum = self.sizeDic[(info[2], info[1])]
