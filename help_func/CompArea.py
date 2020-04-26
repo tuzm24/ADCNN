@@ -16,6 +16,7 @@ class Component:
     COMPONENT_Cb = 1
     COMPONENT_Cr = 2
     MAX_NUM_COMPONENT = 3
+    INDEX_DIC = {COMPONENT_Y: 'Y', COMPONENT_Cb: 'Cb', COMPONENT_Cr: 'Cr'}
 
 
 class ChromaFormat:
@@ -30,6 +31,9 @@ class PictureFormat:
     RECONSTRUCTION = 2
     UNFILTEREDRECON = 3
     MAX_NUM_COMPONENT = 4
+    INDEX_DIC = {ORIGINAL:'ORIGINAL', PREDICTION:'PREDICTION',
+                 RECONSTRUCTION:'RECONSTRUCTION',
+                 UNFILTEREDRECON:'UNFILTEREDRECON'}
 
 class TuDataIndex:
     QP = 0
@@ -277,6 +281,8 @@ class UnitBuf:
         self.reconstruction = [ReconY, ReconCb, ReconCr]
         self.unfilteredRecon = [UnfilteredY, UnfilteredCb, UnfilteredCr]
         self.pelBuf = [self.original, self.prediction, self.reconstruction, self.unfilteredRecon]
+        self.pelDic = {PictureFormat.ORIGINAL:self.original, PictureFormat.PREDICTION:self.prediction,
+                       PictureFormat.RECONSTRUCTION:self.reconstruction, PictureFormat.UNFILTEREDRECON:self.unfilteredRecon}
         self.tulist = tuList
 
     def CopyBlock(self, others ,PictureFormatID):

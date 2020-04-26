@@ -283,6 +283,8 @@ class result_collection:
         for x in self.result_dic.values():
             x[-1] = np.mean(x[-1])
         self.printAndPlot(logger, tb, epoch)
+        self.loss.append(list())
+        self.mse.append(list())
 
     def printAndPlot(self, logger, tb, epoch):
         learning_str = LearningIndex.INDEX_DIC[self.istraining]
@@ -343,7 +345,7 @@ class NetTrainAndTest:
                 # self.net = self.net.cuda()
                 self.criterion = self.criterion.cuda()
                 self.ResultMSELoss = self.ResultMSELoss.cuda()
-        self.optimizer = self.setopt(self.net.parameters(), NetManager.cfg.INIT_LEARNING_RATE, opt)
+        self.optimizer = self.setopt(self.net.parameters(), NetManager.cfg.INIT_LEARNING_RATE*0.1, opt)
         # self.lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer=self.optimizer,
         #                                               milestones=[int(NetManager.cfg.OBJECT_EPOCH * 0.5),
         #                                                           int(NetManager.cfg.OBJECT_EPOCH * 0.75)],
@@ -356,10 +358,10 @@ class NetTrainAndTest:
         self.lr_scheduler = GradualWarmupScheduler(self.optimizer, multiplier=10, total_epoch=10, after_scheduler=self.lr_after_dscheduler)
         self.highestScore = 0
         self.epoch = 0
-        self.load_model()
         self.trc = result_collection(LearningIndex.TRAINING)
         self.vrc = result_collection(LearningIndex.VALIDATION)
         self.testrc = result_collection(LearningIndex.TEST)
+        self.load_model()
 
 
     def setGPUnum(self, gpunum = None):
@@ -602,9 +604,9 @@ class NetTrainAndTest:
         # self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=95)
         # self.tb.plotMAEImage(cumsum_valid, 'Error_MAE', percentile=100)
         self.vrc.endofEpoch(self.logger, self.tb, self.epoch)
-        if self.highestScore < self.vrc.mse[-1]:
+        if self.highestScore > self.vrc.mse[-2]:
             self.save_model(isBest=True)
-            self.highestScore = self.vrc.mse[-1]
+            self.highestScore = self.vrc.mse[-2]
             self.logger.info('is Highest Model')
         else:
             self.save_model(isBest=False)

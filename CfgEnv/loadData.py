@@ -63,8 +63,8 @@ class  DataBatch(NetManager):
         self.iter = 0
         self.reshapeFuncs = (self.reshapeOrg, self.reshapePred,
                              self.reshapeRecon, self.reshapeUnfiltered)
-        self.imageMean = 0
-        self.imageStd = 1023
+        self.imageMean = 0.0
+        self.imageStd = 1023.0
         self.tulistMean = np.array((0, 0, 0, 0, 22, 0,  0, 0, 0)).reshape((-1, 1))
         self.tulistStd =  np.array((1, 1, 1, 1, 37, 69, 6, 2, 2 )).reshape((-1, 1))
 

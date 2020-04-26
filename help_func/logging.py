@@ -36,8 +36,8 @@ class LoggingHelper(object):
     def __init__(self):
         pass
     @classmethod
-    def get_instance(cls):
-        if cls.INSTANCE is None and multiprocessing.current_process().name=='MainProcess':
+    def get_instance(cls, always=False):
+        if cls.INSTANCE is None and (multiprocessing.current_process().name=='MainProcess' or always):
             cls.INSTANCE = LoggingHelper()
         return cls.INSTANCE
 

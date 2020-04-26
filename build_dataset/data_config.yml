@@ -81,3 +81,5 @@ OPT: 1  # [0: Random], [1: Compensate Block Area], [2: Compensate Block Error by
 COMPARE_OPT: 3  # [1: Prediction], [2: Reconstruction], [3: Unfiltered] # Only 'OPT' option is 2 or 3
 YUV_OPT: 0  # [0: YUV] , [1:Y], [2: UV] # Only 'OPT' option is 2 or 3
 
+#getTrainingByPic
+BYPIC: 1

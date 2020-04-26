@@ -23,6 +23,10 @@ from help_func.CompArea import Area
 
 from collections import namedtuple
 import csv
+
+from help_func.CompArea import PictureFormat
+from help_func.CompArea import LearningIndex
+
 datatype = namedtuple('datatype', ['type', 'binlist', 'object_num', 'curent_num', 'opt_num'])
 if __name__ == '__main__':
     os.chdir("../")
@@ -34,7 +38,7 @@ class BuildData(object):
     COLOR_RED = [304, 336, 1020]
     COLOR_GREEN = np.array([149, 43, 21], dtype='int16') << 2
     COLOR_BLUE = np.array([29, 255, 107], dtype='int16') << 2
-    logger = LoggingHelper.get_instance().logger
+    logger = LoggingHelper.get_instance(always=True).logger
     configpath = './build_dataset/data_config.yml'
     cfg = Config(configpath, logger)
     os.makedirs(cfg.DATASET_PATH, exist_ok=True)
@@ -48,6 +52,9 @@ class BuildData(object):
     csv_name = cfg.CSV_NAME
     others_data = cfg.TU_DATA_OTHERS
     tu_data_num = len(others_data) + 4
+
+
+
 
     # Data Format Config
     isOnlyLuma = cfg.ONLY_LUMA
@@ -68,6 +75,15 @@ class BuildData(object):
     os.makedirs(validation_path, exist_ok=True)
     os.makedirs(testset_path, exist_ok=True)
     os.makedirs(sample_path, exist_ok=True)
+
+    if cfg.BYPIC:
+        for value in PictureFormat.INDEX_DIC.values():
+            os.makedirs(os.path.join(trainingset_path, value), exist_ok=True)
+            os.makedirs(os.path.join(validation_path, value), exist_ok=True)
+            os.makedirs(os.path.join(testset_path, value), exist_ok=True)
+        os.makedirs(os.path.join(trainingset_path, 'TU'), exist_ok=True)
+        os.makedirs(os.path.join(validation_path, 'TU'), exist_ok=True)
+        os.makedirs(os.path.join(testset_path, 'TU'), exist_ok=True)
     temp_path = cfg.TEMP_PATH
     depth = cfg.DECODER_BIT_DEPTH
     if depth == 10:
@@ -159,7 +175,7 @@ class imgInfo(BuildData):
         self.POC = struct.unpack('<h', self.img.read(2))[0]
 
         self.bin_number = startbinnum
-
+        self.target_num = targetnum
         self.target_num_list = np.full(self.POC, targetnum//self.POC)
         self.target_num_list[:targetnum%self.POC] += 1
         np.random.shuffle(self.target_num_list)
@@ -178,10 +194,94 @@ class imgInfo(BuildData):
         if len(self.pelCumsum):
             self.pelCumsum = np.cumsum(np.array(self.pelCumsum), dtype='int32')
         self.dataopt = data_opt  # 0 : test, 1 : training, 2 : validation
+        if self.dataopt == LearningIndex.TEST:
+            self.path = self.testset_path
+        elif self.dataopt == LearningIndex.TRAINING:
+            self.path = self.trainingset_path
+        else:
+            self.path = self.validation_path
 
     # def Check_Cfg_Setting(self):
     #     if self.boundary_pad !=2 and (self.luma_pad !=0 or self.chroma_pad !=0):
     #         logger.error("PIC_BOUNDARY_PAD is must '2', if you want use pad data")
+
+    def getDataByPic(self):
+        self.logger.info("%s binfile get training set.." % self.name)
+        if self.cfg.SKIP_TU_DEPENDENT_QP == 0:
+            if self.qp not in self.qpList:
+                self.logger.info("  Not matched qp..")
+                self.logger.info("  Skip binfile..")
+                return []
+        csv_return_list = []
+
+        getPocBoolList = np.array([True]*self.POC)
+        if self.target_num>0:
+            getPocBoolList[self.target_num:] = False
+        np.random.shuffle(getPocBoolList)
+        for poc, ofPOC in enumerate(getPocBoolList):
+            if not ofPOC:
+                continue
+            name = self.name+'_'+str(poc)+'.npz'
+            # st_time = time.time()
+            # Pic = []  # piclist {0:Original, 1:prediction, 2:reconstruction, 3:unfiltered }
+            # PicUV = []
+            # pocMode = struct.unpack('<h', self.img.read(2))[0]
+            if self.ctu_data_num > 0:
+                CTUInfo = self.getCTUInfo()
+            YSplitInfo = self.getTuInfo()
+            CSplitInfo = self.getTuInfo()
+            # print("Until Make Pic&TU : %s", time.time() - st_time)
+            # self.imgUnpack(Pic)
+            # print("Until Make Pic&TU : %s", time.time() - st_time)
+            pic = self.imgUnpack()
+            # tumaps = self.getTuMap(YSplitInfo = YSplitInfo,
+            #                       CSplitInfo = CSplitInfo)
+
+            if np.sum(pic.original[0]) == 0:
+                self.logger.error('   %s poc %s Original is zero' % (self.name, poc))
+                return
+            try:
+                self.logger.info("  %s POC %s" % (self.name, poc))
+                self.logger.debug("  %s Prediction PSNR [YUV : %s], [Y : %s], [U : %s], [V : %s]"
+                                  % (
+                                      self.name, self.getPSNR(pic.original, pic.prediction),
+                                      self.getPSNR(pic.original[0], pic.prediction[0]),
+                                      self.getPSNR(pic.original[1], pic.prediction[1]),
+                                      self.getPSNR(pic.original[2], pic.prediction[2])))
+
+                self.logger.debug("  %s Reconstruction PSNR [YUV : %s], [Y : %s], [U : %s], [V : %s]"
+                                  % (
+                                      self.name, self.getPSNR(pic.original, pic.reconstruction),
+                                      self.getPSNR(pic.original[0], pic.reconstruction[0]),
+                                      self.getPSNR(pic.original[1], pic.reconstruction[1]),
+                                      self.getPSNR(pic.original[2], pic.reconstruction[2])))
+
+                self.logger.debug("  %s Unfiltered PSNR [YUV : %s], [Y : %s], [U : %s], [V : %s]"
+                                  % (
+                                      self.name, self.getPSNR(pic.original, pic.unfilteredRecon),
+                                      self.getPSNR(pic.original[0], pic.unfilteredRecon[0]),
+                                      self.getPSNR(pic.original[1], pic.unfilteredRecon[1]),
+                                      self.getPSNR(pic.original[2], pic.unfilteredRecon[2])))
+            except Exception as e:
+                self.logger.error(e)
+                self.logger.error('   %s poc %s cannot calc PSNR' % (self.name, poc))
+                return
+
+
+            for key, value in pic.pelDic.items():
+                np.savez_compressed(os.path.join(self.path, PictureFormat.INDEX_DIC[key], name),
+                                    Y=value[0], Cb=value[1], Cr=value[2])
+
+            np.savez_compressed(os.path.join(self.path, 'TU'), LUMA=YSplitInfo.tulist, CHROMA=CSplitInfo.tulist)
+
+
+
+
+            self.logger.info("  POC_%d finished(%s)" % (poc, self.name))
+        self.img.close()
+        os.remove('./ywkim_' + self.name + '.bin')
+        return csv_return_list
+
 
     def getPSNR(self, org, control):
         if self.depth == 10:
@@ -259,6 +359,8 @@ class imgInfo(BuildData):
             #     self.logger.info("  Skip POC...")
             #     continue
             # print("Until Make Calc PSNR : %s", time.time() - st_time)
+
+
 
             if self.use_const_block:
                 cbi = self.cfg.CONST_BLOCK_INTERVAL
@@ -904,6 +1006,9 @@ class SplitManager(BuildData):
             return
         name = self.runDecoder(command)
         splitimg = imgInfo(name, isTraining, targetnum, start_bin_num)
+        if self.cfg.BYPIC:
+            return splitimg.getDataByPic()
+
         if isTraining:
             return splitimg.getTrainingset()
         else:
@@ -924,29 +1029,35 @@ class SplitManager(BuildData):
         return temp
 
 
-    def getDataset(self, kind_of_data):
-        obj_num = self.datatype[kind_of_data].object_num - self.datatype[kind_of_data].curent_num
-        if obj_num<=0:
-            self.logger.info("number of current {} is over obejct num".format(kind_of_data))
-        datalist = self.datatype[kind_of_data].binlist
-        if not len(datalist):
-            self.logger.info('There is no data : {}'.format(kind_of_data))
-            return
-        targetnumlist = np.full(len(datalist), obj_num // len(datalist))
-        targetnumlist[:obj_num % len(datalist)] += 1
-        start_num_list = np.cumsum(targetnumlist) + self.datatype[kind_of_data].curent_num - targetnumlist
-
-        commands = self.initCommand(self.datatype[kind_of_data].binlist)
-        # self.runThreading(commands[0], 1, targetnumlist[0], start_num_list[0])
-        pool = Pool(self.corenum)
-        csv_list = self.extend_list(pool.starmap(self.runThreading, zip(commands, [self.datatype[kind_of_data].opt_num] * len(commands), targetnumlist, start_num_list)))
-        if kind_of_data=='Training':
-            # myUtil.initHeaderCSV(self.training_csv_path, self.csv_header)
-            # training_file = open(self.training_csv_path, 'a', newline='')
-            # self.training_csv = csv.writer(training_file)
-            self.initHeaderAndWriteCSV(self.training_csv_path, self.csv_header, csv_list)
-        elif kind_of_data=='Validation':
-            self.initHeaderAndWriteCSV(self.validation_csv_path, self.csv_header, csv_list)
+    def getDataset(self, kind_of_data, obj_POC=100):
+        if self.cfg.BYPIC:
+            commands = self.initCommand(self.datatype[kind_of_data].binlist)
+            pool = Pool(self.corenum)
+            pool.starmap(self.runThreading,
+                         zip(commands, [self.datatype[kind_of_data].opt_num] * len(commands), [obj_POC]*len(commands),
+                             [0]*len(commands)))
+        else:
+            obj_num = self.datatype[kind_of_data].object_num - self.datatype[kind_of_data].curent_num
+            if obj_num<=0:
+                self.logger.info("number of current {} is over obejct num".format(kind_of_data))
+            datalist = self.datatype[kind_of_data].binlist
+            if not len(datalist):
+                self.logger.info('There is no data : {}'.format(kind_of_data))
+                return
+            targetnumlist = np.full(len(datalist), obj_num // len(datalist))
+            targetnumlist[:obj_num % len(datalist)] += 1
+            start_num_list = np.cumsum(targetnumlist) + self.datatype[kind_of_data].curent_num - targetnumlist
+            commands = self.initCommand(self.datatype[kind_of_data].binlist)
+            # self.runThreading(commands[0], 1, targetnumlist[0], start_num_list[0])
+            pool = Pool(self.corenum)
+            csv_list = self.extend_list(pool.starmap(self.runThreading, zip(commands, [self.datatype[kind_of_data].opt_num] * len(commands), targetnumlist, start_num_list)))
+            if kind_of_data=='Training':
+                # myUtil.initHeaderCSV(self.training_csv_path, self.csv_header)
+                # training_file = open(self.training_csv_path, 'a', newline='')
+                # self.training_csv = csv.writer(training_file)
+                self.initHeaderAndWriteCSV(self.training_csv_path, self.csv_header, csv_list)
+            elif kind_of_data=='Validation':
+                self.initHeaderAndWriteCSV(self.validation_csv_path, self.csv_header, csv_list)
 
         #     myUtil.initHeaderCSV(self.validation_csv_path, self.csv_header)
         #     validation_file = open(self.validation_csv_path, 'a', newline='')
@@ -977,7 +1088,7 @@ if __name__ == '__main__':
     sp = SplitManager()
     sp.getDataset('Training')
     sp.getDataset('Validation')
-    sp.getDataset('Test')
+    # sp.getDataset('Test')
 
     # st = time.time()
     # fsize = os.path.getsize('./ywkim_AI_MAIN10_FoodMarket4_3840x2160_60_10b_S02_27.bin')
