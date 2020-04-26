@@ -221,7 +221,7 @@ class imgInfo(BuildData):
         for poc, ofPOC in enumerate(getPocBoolList):
             if not ofPOC:
                 continue
-            name = self.name+'_'+str(poc)+'.npz'
+            name = self.name+'_POC'+str(poc)+'.npz'
             # st_time = time.time()
             # Pic = []  # piclist {0:Original, 1:prediction, 2:reconstruction, 3:unfiltered }
             # PicUV = []
@@ -272,7 +272,7 @@ class imgInfo(BuildData):
                 np.savez_compressed(os.path.join(self.path, PictureFormat.INDEX_DIC[key], name),
                                     Y=value[0], Cb=value[1], Cr=value[2])
 
-            np.savez_compressed(os.path.join(self.path, 'TU'), LUMA=YSplitInfo.tulist, CHROMA=CSplitInfo.tulist)
+            np.savez_compressed(os.path.join(self.path, 'TU', name), LUMA=YSplitInfo.tulist, CHROMA=CSplitInfo.tulist)
 
 
 
